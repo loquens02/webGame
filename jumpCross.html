@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>플랫폼 점프 게임 (더블 점프/안전지대/체력/승리 효과 추가)</title>
+  <title>플랫폼 점프 게임 (추가 기능 포함)</title>
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
@@ -20,17 +20,18 @@
     // 게임 상수 및 전역 변수
     const gravity = 0.7;
     const scrollSpeed = 2;
+    const horizontalSpeed = 5;
     let health = 3;
     let winnerCount = 0;
     let gameState = 'playing'; // 'playing' 또는 'finished'
-    let jumpCount = 0;         // 공중 점프 횟수 (최대 2)
+    let jumpCount = 0;         // 최대 2번 점프 가능 (더블 점프)
     let lastJumpTime = 0;      // 마지막 점프 시각(ms)
 
-    // 안전지대: 좌측(시작)와 우측(종료), 화면의 10% 너비/높이
+    // 안전지대: 화면 하단 좌측(시작)과 우측(종료), 화면의 10% 너비/높이
     const safeZoneWidth = canvas.width * 0.1;
     const safeZoneHeight = canvas.height * 0.1;
 
-    // 플레이어 객체 (초기 위치는 안전지대 위에 있도록 나중에 resetPlayer() 호출 시 결정)
+    // 플레이어 객체 (초기 위치는 resetPlayer() 호출 시 결정)
     const player = {
       x: 100,
       y: canvas.height - 150,
@@ -40,6 +41,12 @@
       isJumping: false,
       fallen: false,    // 바닥 충돌 후 체력 감소 처리가 중복되지 않도록 하는 플래그
       jumpPower: -15    // 점프력
+    };
+
+    // 좌우 이동을 위한 키 상태 변수
+    const keys = {
+      left: false,
+      right: false
     };
 
     // 승리 시 날아다니는 긴 파란 블럭 객체 (게임 승리 시 생성)
@@ -75,7 +82,7 @@
         width: width,
         height: 10,
         isDisappearing: isDisappearing,
-        disappearTimer: isDisappearing ? 3000 : null,
+        disappearTimer: isDisappearing ? 3000 : null, // 3000ms 후 사라짐
         elapsedTime: 0
       };
     }
@@ -91,7 +98,7 @@
       }
     }
 
-    // 역방향 폭포 효과 (기존 코드와 동일)
+    // 역방향 폭포 효과 (기존 코드)
     let waterfallParticles = [];
     function initWaterfallParticles() {
       const regionXStart = canvas.width / 2 - 50;
@@ -116,7 +123,7 @@
       });
     }
 
-    // 안전지대 판별 함수
+    // 안전지대 판별 함수 (플레이어가 해당 영역에 있는지)
     function inStartZone() {
       return player.x < safeZoneWidth &&
              (player.y + player.height) >= (canvas.height - safeZoneHeight);
@@ -126,7 +133,7 @@
              (player.y + player.height) >= (canvas.height - safeZoneHeight);
     }
 
-    // 플레이어를 시작 안전지대 위에 재배치 (위치, 점프 상태, 플래그 초기화)
+    // 플레이어를 시작 안전지대 위에 재배치 (위치 및 상태 초기화)
     function resetPlayer() {
       player.x = safeZoneWidth / 2 - player.width / 2;
       player.y = canvas.height - safeZoneHeight - player.height;
@@ -146,7 +153,7 @@
       winnerBlock = null;
     }
 
-    // 키 입력 이벤트: 점프/더블 점프 및 (승리 시) 재시작
+    // 키 입력 이벤트: Space는 점프/더블 점프, 좌우 화살표로 이동 처리
     document.addEventListener("keydown", function(event) {
       if (event.code === "Space") {
         if (gameState === 'playing') {
@@ -158,18 +165,29 @@
             jumpCount = 1;
             lastJumpTime = currentTime;
           } else if (jumpCount === 1 && (currentTime - lastJumpTime) <= 1000) {
-            // 1초 이내에 입력한 경우 더블 점프 (최대 2번)
+            // 1초 이내에 입력하면 더블 점프 (최대 2번)
             player.velocityY = player.jumpPower;
             jumpCount = 2;
             lastJumpTime = currentTime;
           }
         } else if (gameState === 'finished') {
-          // 승리 상태에서 space 입력 시 재시작
+          // 승리 상태에서 Space 입력 시 재시작
           resetPlayer();
           gameState = 'playing';
           initPlatforms();
           winnerBlock = null;
         }
+      } else if (event.code === "ArrowLeft") {
+        keys.left = true;
+      } else if (event.code === "ArrowRight") {
+        keys.right = true;
+      }
+    });
+    document.addEventListener("keyup", function(event) {
+      if (event.code === "ArrowLeft") {
+        keys.left = false;
+      } else if (event.code === "ArrowRight") {
+        keys.right = false;
       }
     });
 
@@ -181,7 +199,17 @@
       lastTime = now;
 
       if (gameState === 'playing') {
-        // 플레이어 물리 처리
+        // 좌우 이동 처리 (화면 경계 내)
+        if (keys.left) {
+          player.x -= horizontalSpeed;
+        }
+        if (keys.right) {
+          player.x += horizontalSpeed;
+        }
+        if (player.x < 0) player.x = 0;
+        if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
+
+        // 플레이어의 수직 물리 처리
         player.velocityY += gravity;
         player.y += player.velocityY;
 
@@ -236,7 +264,7 @@
         // 폭포 효과 업데이트
         updateWaterfallParticles(deltaTime);
 
-        // 화면 바닥(=canvas.height)과 충돌 시 처리
+        // 화면 바닥과 충돌 시 처리
         if (player.y + player.height >= canvas.height) {
           // 안전지대(시작 또는 종료)에 있으면 정상 착지
           if (inStartZone() || inFinishZone()) {
@@ -245,8 +273,9 @@
             player.isJumping = false;
             jumpCount = 0;
             player.fallen = false;
-          } else if (!player.fallen) {
-            // 안전지대가 아닌 경우 체력 감소 후 시작지점으로 재배치
+          }
+          // 안전지대가 아닌 경우 체력 감소 후 시작지점으로 재배치
+          else if (!player.fallen) {
             health--;
             player.fallen = true;
             if (health <= 0) {
