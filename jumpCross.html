@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>플랫폼 점프 게임 (추가 기능 포함)</title>
+  <title>플랫폼 점프 게임 (승리 이미지 이동 및 스쿼시 효과 추가)</title>
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
@@ -16,7 +16,7 @@
     const ctx = canvas.getContext('2d');
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-
+    
     // 게임 상수 및 전역 변수
     const gravity = 0.7;
     const scrollSpeed = 2;
@@ -26,12 +26,34 @@
     let gameState = 'playing'; // 'playing' 또는 'finished'
     let jumpCount = 0;         // 최대 2번 점프 가능 (더블 점프)
     let lastJumpTime = 0;      // 마지막 점프 시각(ms)
+    let finishTime = 0;        // 승리 상태 전환 시각(ms)
 
+    // 승리 이미지 설정
+    const victoryImage = new Image();
+    victoryImage.src = 'img/victory.blueSnake1.png';
+    
+    // 승리 상태에서 이동 및 스쿼시 효과를 위한 객체
+    let victory = null;
+    function initVictory() {
+      victory = {
+        x: canvas.width / 2 - 100,
+        y: canvas.height / 2 - 100,
+        vx: 3,   // 초기 수평 속도
+        vy: 2,   // 초기 수직 속도
+        width: 200,
+        height: 200,
+        squashTime: 0,       // 스쿼시 진행 시간(ms)
+        squashDuration: 500, // 스쿼시 전체 지속 시간(ms)
+        isSquashing: false,  // 스쿼시 효과 활성 여부
+        scale: 1             // 현재 수평 스케일 (기본 1)
+      };
+    }
+    
     // 안전지대: 화면 하단 좌측(시작)과 우측(종료), 화면의 10% 너비/높이
     const safeZoneWidth = canvas.width * 0.1;
     const safeZoneHeight = canvas.height * 0.1;
-
-    // 플레이어 객체 (초기 위치는 resetPlayer() 호출 시 결정)
+    
+    // 플레이어 객체
     const player = {
       x: 100,
       y: canvas.height - 150,
@@ -39,40 +61,13 @@
       height: 50,
       velocityY: 0,
       isJumping: false,
-      fallen: false,    // 바닥 충돌 후 체력 감소 처리가 중복되지 않도록 하는 플래그
-      jumpPower: -15    // 점프력
+      fallen: false,
+      jumpPower: -15
     };
-
-    // 좌우 이동을 위한 키 상태 변수
-    const keys = {
-      left: false,
-      right: false
-    };
-
-    // 승리 시 날아다니는 긴 파란 블럭 객체 (게임 승리 시 생성)
-    let winnerBlock = null;
-    function initWinnerBlock() {
-      winnerBlock = {
-        x: canvas.width / 2 - 100,
-        y: canvas.height / 2 - 10,
-        width: 200, 
-        height: 20,
-        vx: 3,
-        vy: 2
-      };
-    }
-    function updateWinnerBlock() {
-      if (!winnerBlock) return;
-      winnerBlock.x += winnerBlock.vx;
-      winnerBlock.y += winnerBlock.vy;
-      if (winnerBlock.x <= 0 || winnerBlock.x + winnerBlock.width >= canvas.width) {
-        winnerBlock.vx *= -1;
-      }
-      if (winnerBlock.y <= 0 || winnerBlock.y + winnerBlock.height >= canvas.height) {
-        winnerBlock.vy *= -1;
-      }
-    }
-
+    
+    // 좌우 이동 키 상태
+    const keys = { left: false, right: false };
+    
     // 발판 관련 변수 및 함수
     let platforms = [];
     function createPlatform(x, y, width, isDisappearing = false) {
@@ -82,7 +77,7 @@
         width: width,
         height: 10,
         isDisappearing: isDisappearing,
-        disappearTimer: isDisappearing ? 3000 : null, // 3000ms 후 사라짐
+        disappearTimer: isDisappearing ? 3000 : null,
         elapsedTime: 0
       };
     }
@@ -92,13 +87,13 @@
       while (x < canvas.width * 2) {
         const platformY = canvas.height - (Math.random() * 100 + 50);
         const platformWidth = 100;
-        const isDisappearing = Math.random() < 0.3; // 30% 확률
+        const isDisappearing = Math.random() < 0.3;
         platforms.push(createPlatform(x, platformY, platformWidth, isDisappearing));
         x += platformWidth + (Math.random() * 80 + 40);
       }
     }
-
-    // 역방향 폭포 효과 (기존 코드)
+    
+    // 역방향 폭포 효과
     let waterfallParticles = [];
     function initWaterfallParticles() {
       const regionXStart = canvas.width / 2 - 50;
@@ -122,8 +117,8 @@
         }
       });
     }
-
-    // 안전지대 판별 함수 (플레이어가 해당 영역에 있는지)
+    
+    // 안전지대 판별 함수
     function inStartZone() {
       return player.x < safeZoneWidth &&
              (player.y + player.height) >= (canvas.height - safeZoneHeight);
@@ -132,8 +127,8 @@
       return (player.x + player.width) > (canvas.width - safeZoneWidth) &&
              (player.y + player.height) >= (canvas.height - safeZoneHeight);
     }
-
-    // 플레이어를 시작 안전지대 위에 재배치 (위치 및 상태 초기화)
+    
+    // 플레이어 리셋
     function resetPlayer() {
       player.x = safeZoneWidth / 2 - player.width / 2;
       player.y = canvas.height - safeZoneHeight - player.height;
@@ -143,39 +138,40 @@
       lastJumpTime = 0;
       player.fallen = false;
     }
-
-    // 체력 0 이하 시 전체 초기화 (체력 리셋, 발판 재생성 등)
+    
+    // 게임 리셋
     function resetGame() {
       health = 3;
       resetPlayer();
       initPlatforms();
       gameState = 'playing';
-      winnerBlock = null;
+      finishTime = 0;
+      victory = null;
     }
-
-    // 키 입력 이벤트: Space는 점프/더블 점프, 좌우 화살표로 이동 처리
+    
+    // 키 이벤트 처리: Space는 점프/더블 점프, 좌우 화살표는 이동
     document.addEventListener("keydown", function(event) {
       if (event.code === "Space") {
         if (gameState === 'playing') {
           let currentTime = performance.now();
-          // 지면(또는 시작 안전지대)에 있을 때: 첫 점프
           if (!player.isJumping || inStartZone()) {
             player.velocityY = player.jumpPower;
             player.isJumping = true;
             jumpCount = 1;
             lastJumpTime = currentTime;
           } else if (jumpCount === 1 && (currentTime - lastJumpTime) <= 1000) {
-            // 1초 이내에 입력하면 더블 점프 (최대 2번)
             player.velocityY = player.jumpPower;
             jumpCount = 2;
             lastJumpTime = currentTime;
           }
         } else if (gameState === 'finished') {
-          // 승리 상태에서 Space 입력 시 재시작
-          resetPlayer();
-          gameState = 'playing';
-          initPlatforms();
-          winnerBlock = null;
+          // 승리 직후 1초 동안은 Space 입력 무시
+          if (performance.now() - finishTime >= 1000) {
+            resetPlayer();
+            gameState = 'playing';
+            initPlatforms();
+            victory = null;
+          }
         }
       } else if (event.code === "ArrowLeft") {
         keys.left = true;
@@ -190,29 +186,25 @@
         keys.right = false;
       }
     });
-
+    
     // 메인 업데이트 루프
     let lastTime = performance.now();
     function update() {
       let now = performance.now();
       let deltaTime = now - lastTime;
       lastTime = now;
-
+      
       if (gameState === 'playing') {
-        // 좌우 이동 처리 (화면 경계 내)
-        if (keys.left) {
-          player.x -= horizontalSpeed;
-        }
-        if (keys.right) {
-          player.x += horizontalSpeed;
-        }
+        // 좌우 이동 처리
+        if (keys.left) { player.x -= horizontalSpeed; }
+        if (keys.right) { player.x += horizontalSpeed; }
         if (player.x < 0) player.x = 0;
         if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
-
-        // 플레이어의 수직 물리 처리
+        
+        // 플레이어 물리 처리
         player.velocityY += gravity;
         player.y += player.velocityY;
-
+        
         // 발판 스크롤 및 사라지는 발판 처리
         platforms.forEach((platform, index) => {
           platform.x -= scrollSpeed;
@@ -230,7 +222,7 @@
             }
           }
         });
-
+        
         // 발판과의 충돌 (착지) 처리
         platforms.forEach(platform => {
           if (
@@ -246,12 +238,11 @@
             jumpCount = 0;
           }
         });
-
-        // 화면 좌측으로 벗어난 발판 제거
+        
+        // 화면 좌측으로 벗어난 발판 제거 및 우측 추가
         while (platforms.length > 0 && platforms[0].x + platforms[0].width < 0) {
           platforms.shift();
         }
-        // 우측 끝에 도달하면 새 발판 추가
         let lastPlatform = platforms[platforms.length - 1];
         if (lastPlatform && lastPlatform.x < canvas.width) {
           const newX = lastPlatform.x + lastPlatform.width + (Math.random() * 80 + 40);
@@ -260,22 +251,19 @@
           const isDisappearing = Math.random() < 0.3;
           platforms.push(createPlatform(newX, newY, newWidth, isDisappearing));
         }
-
+        
         // 폭포 효과 업데이트
         updateWaterfallParticles(deltaTime);
-
-        // 화면 바닥과 충돌 시 처리
+        
+        // 화면 바닥과의 충돌 처리
         if (player.y + player.height >= canvas.height) {
-          // 안전지대(시작 또는 종료)에 있으면 정상 착지
           if (inStartZone() || inFinishZone()) {
             player.y = canvas.height - player.height;
             player.velocityY = 0;
             player.isJumping = false;
             jumpCount = 0;
             player.fallen = false;
-          }
-          // 안전지대가 아닌 경우 체력 감소 후 시작지점으로 재배치
-          else if (!player.fallen) {
+          } else if (!player.fallen) {
             health--;
             player.fallen = true;
             if (health <= 0) {
@@ -286,73 +274,113 @@
             }
           }
         }
-
-        // 종료 안전지대(우측 하단)에 도달하면 승리 처리
-        if (inFinishZone()) {
+        
+        // 종료 안전지대 도달 시 승리 처리
+        if (inFinishZone() && gameState !== 'finished') {
           gameState = 'finished';
+          finishTime = performance.now();
           winnerCount++;
-          initWinnerBlock();
+          initVictory();
         }
       } else if (gameState === 'finished') {
-        // 승리 상태에서는 파란 블럭 애니메이션 업데이트
-        updateWinnerBlock();
+        // 승리 상태: victory 이미지 이동 및 스쿼시 효과 적용
+        if (victory) {
+          // 이동 처리
+          victory.x += victory.vx;
+          victory.y += victory.vy;
+          
+          // 좌우 경계 충돌 시 (스쿼시 효과 포함)
+          if (victory.x <= 0) {
+            victory.x = 0;
+            victory.vx = -victory.vx;
+            if (!victory.isSquashing) { victory.isSquashing = true; victory.squashTime = 0; }
+          }
+          if (victory.x + victory.width >= canvas.width) {
+            victory.x = canvas.width - victory.width;
+            victory.vx = -victory.vx;
+            if (!victory.isSquashing) { victory.isSquashing = true; victory.squashTime = 0; }
+          }
+          // 상하 경계 충돌 (반사만)
+          if (victory.y <= 0) {
+            victory.y = 0;
+            victory.vy = -victory.vy;
+          }
+          if (victory.y + victory.height >= canvas.height) {
+            victory.y = canvas.height - victory.height;
+            victory.vy = -victory.vy;
+          }
+          
+          // 스쿼시 효과 업데이트 (좌우 크기가 선형적으로 80%까지 줄었다가 복원)
+          if (victory.isSquashing) {
+            victory.squashTime += deltaTime;
+            if (victory.squashTime < victory.squashDuration / 2) {
+              victory.scale = 1 - 0.2 * (victory.squashTime / (victory.squashDuration / 2));
+            } else if (victory.squashTime < victory.squashDuration) {
+              victory.scale = 0.8 + 0.2 * ((victory.squashTime - victory.squashDuration / 2) / (victory.squashDuration / 2));
+            } else {
+              victory.scale = 1;
+              victory.isSquashing = false;
+              victory.squashTime = 0;
+            }
+          }
+        }
       }
-
+      
       draw();
       requestAnimationFrame(update);
     }
-
+    
     // 그리기 함수
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // 배경: 좌측은 흙, 우측은 초원
+      
+      // 배경: 좌측 흙, 우측 초원
       ctx.fillStyle = "#8B4513";
       ctx.fillRect(0, 0, canvas.width / 2, canvas.height);
       ctx.fillStyle = "#7CFC00";
       ctx.fillRect(canvas.width / 2, 0, canvas.width / 2, canvas.height);
-
-      // 역방향 폭포 효과
+      
+      // 폭포 효과
       waterfallParticles.forEach(particle => {
         ctx.fillStyle = "rgba(255, 255, 255, " + particle.alpha + ")";
         ctx.fillRect(particle.x, particle.y, 2, 10);
       });
-
-      // 발판들 그리기 (사라지는 발판은 붉은색, 일반 발판은 파란색)
+      
+      // 발판들 그리기
       platforms.forEach(platform => {
         ctx.fillStyle = platform.isDisappearing ? "#FF6347" : "#0000FF";
         ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
       });
-
-      // 안전지대 그리기: 시작지대(좌측 하단 흙 블럭)와 종료지대(우측 하단 풀 블럭)
+      
+      // 안전지대: 시작(좌측 하단 흙)과 종료(우측 하단 풀)
       ctx.fillStyle = "#8B4513";
       ctx.fillRect(0, canvas.height - safeZoneHeight, safeZoneWidth, safeZoneHeight);
       ctx.fillStyle = "#7CFC00";
       ctx.fillRect(canvas.width - safeZoneWidth, canvas.height - safeZoneHeight, safeZoneWidth, safeZoneHeight);
-
-      // 플레이어 그리기 (노란색)
+      
+      // 플레이어 그리기
       ctx.fillStyle = "#FFFF00";
       ctx.fillRect(player.x, player.y, player.width, player.height);
-
-      // 체력 및 승리 횟수 표시 (좌측 상단)
+      
+      // 체력 및 승리 횟수 표시
       ctx.fillStyle = "#000000";
       ctx.font = "20px Arial";
       ctx.fillText("Health: " + health, 20, 30);
       ctx.fillText("Wins: " + winnerCount, 20, 60);
-
+      
       if (gameState === 'finished') {
-        // 축하 메시지
         ctx.fillStyle = "#000000";
         ctx.font = "40px Arial";
-        ctx.fillText("축하합니다! 승리!", canvas.width / 2 - 150, canvas.height / 2 - 50);
-        // 승리 시 날아다니는 파란 블럭
-        if (winnerBlock) {
-          ctx.fillStyle = "#0000FF";
-          ctx.fillRect(winnerBlock.x, winnerBlock.y, winnerBlock.width, winnerBlock.height);
+        ctx.fillText("축하합니다! 승리!", canvas.width / 2 - 150, canvas.height / 2 - 100);
+        // 승리 이미지 그리기 (스쿼시 효과 적용)
+        if (victory && victoryImage.complete) {
+          let scaledWidth = victory.width * victory.scale;
+          let drawX = victory.x + (victory.width - scaledWidth) / 2;
+          ctx.drawImage(victoryImage, drawX, victory.y, scaledWidth, victory.height);
         }
       }
     }
-
+    
     // 초기화 후 게임 시작
     resetPlayer();
     initPlatforms();
